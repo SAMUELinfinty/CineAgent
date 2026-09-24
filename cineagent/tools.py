@@ -28,34 +28,53 @@ def tool_get_watchlist_stats() -> dict:
         "sample_titles": [m["title"] for m in all_movies[:5]]
     }
 
+KNOWN_GENRES = [
+    "action", "adventure", "animation", "biography", "comedy", "crime",
+    "documentary", "drama", "family", "fantasy", "film-noir", "history",
+    "horror", "music", "musical", "mystery", "romance", "sci-fi", "sport",
+    "thriller", "war", "western"
+]
+
 def search_watchlist(query: str = "", genre: str = "", media_type: str = "") -> list[dict]:
     """Searches your real IMDb watchlist CSV for titles matching a query, genre, or media_type (Movie vs TV Series)."""
     all_movies = movies.load_movies_from_csv()
     results = []
     
-    clean_query = (query or "").strip().lower()
-    clean_genre = (genre or "").strip().lower()
-    clean_type = (media_type or "").strip().lower()
+    q = (query or "").strip().lower()
+    g = (genre or "").strip().lower()
+    t = (media_type or "").strip().lower()
 
-    # Automatically handle common queries like 'tv series' or 'shows' passed in query parameter
-    if clean_query in ["tv series", "tv show", "tv shows", "series", "shows"]:
-        clean_type = "tv series"
-        clean_query = ""
-    elif clean_query in ["movie", "movies", "films", "film"]:
-        clean_type = "movie"
-        clean_query = ""
+    # Extract media type keywords from query/genre if present
+    for mkw, target_t in [
+        ("tv series", "tv series"), ("tv show", "tv series"), 
+        ("shows", "tv series"), ("series", "tv series"), 
+        ("movies", "movie"), ("movie", "movie"), ("films", "movie"), ("film", "movie")
+    ]:
+        if mkw in q:
+            t = target_t
+            q = q.replace(mkw, "").strip()
+        if mkw in g:
+            t = target_t
+            g = g.replace(mkw, "").strip()
+
+    # Extract genre keywords from query if query contains known genres
+    for genre_kw in KNOWN_GENRES:
+        if genre_kw in q:
+            g = genre_kw
+            q = q.replace(genre_kw, "").strip()
 
     for m in all_movies:
         item_title = m.get("title", "").lower()
         item_genre = m.get("genres", "").lower()
         item_type = m.get("type", "").lower()
 
-        matches_query = clean_query in item_title if clean_query else True
-        matches_genre = clean_genre in item_genre if clean_genre else True
-        matches_type = clean_type in item_type if clean_type else True
+        matches_q = q in item_title if q else True
+        matches_g = g in item_genre if g else True
+        matches_t = t in item_type if t else True
 
-        if matches_query and matches_genre and matches_type:
+        if matches_q and matches_g and matches_t:
             results.append(m)
+
     return results[:5]
 
 TOOL_ROUTER = {
