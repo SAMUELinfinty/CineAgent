@@ -29,6 +29,7 @@ def load_movies_from_csv(file_path: str = CSV_PATH) -> list[dict]:
                     "genres": (row.get("Genres") or "Unknown").strip(),
                     "rating": (row.get("IMDb Rating") or "N/A").strip(),
                     "director": (row.get("Directors") or "Unknown").strip(),
+                    "type": (row.get("Title Type") or "Movie").strip(),
                 })
     return movies
 

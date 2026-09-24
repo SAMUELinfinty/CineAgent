@@ -15,6 +15,8 @@ from telebot.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from dotenv import load_dotenv
 from State import state
 import movies
+from Agent import run_agent
+
 
 
 load_dotenv()
@@ -219,9 +221,10 @@ def handle_message(message: Message):
         
         # Include current movie context if available
         system_context = f"The user is currently discussing the movie: {current_movie}." if current_movie else ""
-        answer = ask_openrouter(message.text, system_context=system_context,chat_id=message.chat.id, enable_tools=True)
-        bot.reply_to(message, answer)
+        answer = run_agent(message.text, chat_id=message.chat.id)
+        bot.reply_to(message,answer)
     except Exception as e:
+        print(f"Agent Error: {e}")
         bot.reply_to(message, "Sorry, the assistant is temporarily unavailable. Please try again.")
 
 if __name__ == "__main__":

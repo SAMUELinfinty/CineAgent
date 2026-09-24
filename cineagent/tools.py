@@ -28,10 +28,41 @@ def tool_get_watchlist_stats() -> dict:
         "sample_titles": [m["title"] for m in all_movies[:5]]
     }
 
+def search_watchlist(query: str = "", genre: str = "", media_type: str = "") -> list[dict]:
+    """Searches your real IMDb watchlist CSV for titles matching a query, genre, or media_type (Movie vs TV Series)."""
+    all_movies = movies.load_movies_from_csv()
+    results = []
+    
+    clean_query = (query or "").strip().lower()
+    clean_genre = (genre or "").strip().lower()
+    clean_type = (media_type or "").strip().lower()
+
+    # Automatically handle common queries like 'tv series' or 'shows' passed in query parameter
+    if clean_query in ["tv series", "tv show", "tv shows", "series", "shows"]:
+        clean_type = "tv series"
+        clean_query = ""
+    elif clean_query in ["movie", "movies", "films", "film"]:
+        clean_type = "movie"
+        clean_query = ""
+
+    for m in all_movies:
+        item_title = m.get("title", "").lower()
+        item_genre = m.get("genres", "").lower()
+        item_type = m.get("type", "").lower()
+
+        matches_query = clean_query in item_title if clean_query else True
+        matches_genre = clean_genre in item_genre if clean_genre else True
+        matches_type = clean_type in item_type if clean_type else True
+
+        if matches_query and matches_genre and matches_type:
+            results.append(m)
+    return results[:5]
+
 TOOL_ROUTER = {
     "get_user_history": tool_get_user_history,
     "search_movies_by_genre": tool_search_movies_by_genre,
-    "get_watchlist_stats": tool_get_watchlist_stats
+    "get_watchlist_stats": tool_get_watchlist_stats,
+    "search_watchlist": search_watchlist
 }
 # OpenAPI/OpenRouter JSON Schemas
 TOOLS_SCHEMA = [
@@ -79,9 +110,34 @@ TOOLS_SCHEMA = [
                 "properties": {}
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_watchlist",
+            "description": "Searches the user's real IMDb watchlist CSV by title keyword or genre.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Title or keyword to search for, e.g. 'Person of Interest', 'Primal'."
+                    },
+                    "genre": {
+                        "type": "string",
+                        "description": "Optional genre filter, e.g. 'Crime', 'Sci-Fi'."
+                    },
+                    "media_type": {
+                        "type": "string",
+                        "description": "Optional media type filter: 'Movie' or 'TV Series'."
+                    }
+                }
+            }
+        }
     }
 ]
 def execute_tool_call(tool_name: str, arguments: dict, chat_id: str | int = None) -> str:
+
     """Executes the requested tool by name with arguments and returns JSON string result."""
     if tool_name not in TOOL_ROUTER:
         return json.dumps({"error": f"Tool '{tool_name}' not found."})
