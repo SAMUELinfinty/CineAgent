@@ -1,7 +1,7 @@
 import json
 from State import state
 import tools
-
+from llm import ask_openrouter
 
 def run_agent(prompt: str, chat_id: str | int) -> str:
     """Orchestrates the Agentic Loop: UNDERSTAND -> DECIDE -> ACT -> OBSERVE -> RESPOND."""
@@ -10,9 +10,6 @@ def run_agent(prompt: str, chat_id: str | int) -> str:
     system_context = f"The user is currently discussing the movie: {current_movie}." if current_movie else ""
 
     # 2. Call ask_openrouter with tools enabled
-    # Import ask_openrouter from cinetele (or llm)
-    from cinetele import ask_openrouter
-    
     response = ask_openrouter(
         prompt=prompt,
         system_context=system_context,

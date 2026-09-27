@@ -2,6 +2,7 @@ import csv
 import os
 import random
 
+
 # Absolute or relative path to your CSV file
 CSV_PATH = os.path.join(os.path.dirname(__file__), "Data", "watchlist.csv")
 
