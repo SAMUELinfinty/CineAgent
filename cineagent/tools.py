@@ -35,6 +35,98 @@ KNOWN_GENRES = [
     "thriller", "war", "western"
 ]
 
+# ─── Mood → Genre Mapping ──────────────────────────────────────────────────────
+# Keywords the user might say → genres to search in the CSV
+# The LLM passes the user's raw mood string; we do the mapping here in Python.
+MOOD_GENRE_MAP = {
+    # Dark / Intense
+    "dark":        ["Crime", "Thriller", "Drama", "Horror"],
+    "gritty":      ["Crime", "Drama", "Thriller"],
+    "intense":     ["Thriller", "Action", "Crime"],
+    "disturbing":  ["Horror", "Thriller", "Drama"],
+    "noir":        ["Crime", "Film-Noir", "Mystery", "Thriller"],
+    # Scary
+    "scary":       ["Horror", "Thriller"],
+    "horror":      ["Horror"],
+    "creepy":      ["Horror", "Mystery", "Thriller"],
+    # Funny / Light
+    "funny":       ["Comedy"],
+    "comedy":      ["Comedy"],
+    "lighthearted":["Comedy", "Family", "Animation"],
+    "feel-good":   ["Comedy", "Drama", "Family"],
+    "cheerful":    ["Comedy", "Family", "Animation"],
+    # Action / Adrenaline
+    "action":      ["Action", "Adventure"],
+    "adrenaline":  ["Action", "Thriller", "Adventure"],
+    "exciting":    ["Action", "Adventure", "Thriller"],
+    "explosive":   ["Action", "Adventure"],
+    # Sci-Fi / Mind-bending
+    "sci-fi":      ["Sci-Fi"],
+    "mind-bending":["Sci-Fi", "Mystery", "Thriller"],
+    "futuristic":  ["Sci-Fi", "Adventure"],
+    "philosophical":["Sci-Fi", "Drama", "Mystery"],
+    # Mystery / Puzzle
+    "mystery":     ["Mystery", "Crime", "Thriller"],
+    "detective":   ["Crime", "Mystery", "Thriller"],
+    "suspense":    ["Thriller", "Mystery", "Crime"],
+    # Emotional / Drama
+    "emotional":   ["Drama", "Romance"],
+    "dramatic":    ["Drama"],
+    "romantic":    ["Romance", "Drama"],
+    "sad":         ["Drama", "Romance"],
+    # Epic / Adventure
+    "epic":        ["Adventure", "Action", "Drama", "History"],
+    "adventure":   ["Adventure", "Action"],
+    "fantasy":     ["Fantasy", "Adventure"],
+    # Inspiring / Biography
+    "inspiring":   ["Drama", "Biography", "History"],
+    "biography":   ["Biography", "Drama", "History"],
+    "war":         ["War", "Drama", "History"],
+    # Chill / Relaxed
+    "chill":       ["Comedy", "Animation", "Family", "Drama"],
+    "relaxed":     ["Comedy", "Animation", "Family"],
+    "cozy":        ["Comedy", "Family", "Drama"],
+}
+
+def tool_recommend_by_mood(mood: str, chat_id: str | int = None) -> list[dict]:
+    """Maps a mood/vibe string to genres, then returns up to 3 unseen watchlist movies that match."""
+    mood_lower = mood.lower()
+
+    # Step 1: Collect all genres that match any keyword in the mood string
+    matched_genres: set[str] = set()
+    for keyword, genres in MOOD_GENRE_MAP.items():
+        if keyword in mood_lower:
+            matched_genres.update(genres)
+
+    # Step 2: Fallback — if no keyword matched, treat words in mood as genre hints directly
+    if not matched_genres:
+        for known in KNOWN_GENRES:
+            if known in mood_lower:
+                matched_genres.add(known.capitalize())
+
+    # Step 3: Load watchlist and filter by matched genres
+    all_movies = movies.load_movies_from_csv()
+
+    # Exclude already-seen and disliked movies if we have a chat_id
+    excluded: set[str] = set()
+    if chat_id:
+        session = state.get_user_session(chat_id)
+        excluded = set(
+            session.get("seen_movies", []) + session.get("disliked_movies", [])
+        )
+
+    candidates = [
+        m for m in all_movies
+        if m["title"] not in excluded
+        and any(g.lower() in m.get("genres", "").lower() for g in matched_genres)
+    ]
+
+    # Return up to 3 diverse candidates (LLM picks the best one to pitch)
+    return {
+        "matched_genres": list(matched_genres),
+        "candidates": candidates[:3]
+    }
+
 def search_watchlist(query: str = "", genre: str = "", media_type: str = "") -> list[dict]:
     """Searches your real IMDb watchlist CSV for titles matching a query, genre, or media_type (Movie vs TV Series)."""
     all_movies = movies.load_movies_from_csv()
@@ -81,7 +173,8 @@ TOOL_ROUTER = {
     "get_user_history": tool_get_user_history,
     "search_movies_by_genre": tool_search_movies_by_genre,
     "get_watchlist_stats": tool_get_watchlist_stats,
-    "search_watchlist": search_watchlist
+    "search_watchlist": search_watchlist,
+    "recommend_by_mood": tool_recommend_by_mood,
 }
 # OpenAPI/OpenRouter JSON Schemas
 TOOLS_SCHEMA = [
@@ -153,6 +246,23 @@ TOOLS_SCHEMA = [
                 }
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recommend_by_mood",
+            "description": "Recommends movies from the watchlist based on the user's current mood or vibe. Use this when the user describes how they feel or what kind of experience they want (e.g. 'something dark', 'a feel-good comedy', 'edge-of-seat thriller').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mood": {
+                        "type": "string",
+                        "description": "The user's mood or vibe, e.g. 'dark gritty thriller', 'something funny and lighthearted', 'mind-bending sci-fi'."
+                    }
+                },
+                "required": ["mood"]
+            }
+        }
     }
 ]
 def execute_tool_call(tool_name: str, arguments: dict, chat_id: str | int = None) -> str:
@@ -163,8 +273,10 @@ def execute_tool_call(tool_name: str, arguments: dict, chat_id: str | int = None
     
     func = TOOL_ROUTER[tool_name]
     
-    # Automatically inject chat_id if required by tool_get_user_history
-    if tool_name == "get_user_history" and "chat_id" not in arguments and chat_id:
+    # Inject chat_id for tools that use it to personalise results
+    # (filtering seen/disliked movies, fetching user session, etc.)
+    CHAT_ID_TOOLS = {"get_user_history", "recommend_by_mood"}
+    if tool_name in CHAT_ID_TOOLS and "chat_id" not in arguments and chat_id:
         arguments["chat_id"] = chat_id
         
     try:

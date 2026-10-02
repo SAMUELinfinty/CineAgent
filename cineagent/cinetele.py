@@ -90,6 +90,21 @@ def generate_movie_recommendation(chat_id):
     pitch = ask_openrouter(prompt)
     return format_movie_recommendation(movie_data, pitch), get_movie_keyboard()
 
+@bot.message_handler(commands=['start'])
+def start_command(message: Message):
+    if str(message.chat.id) != personal_chat_id:
+        bot.reply_to(message, "Sorry, you are not authorized to use this bot.")
+        return
+    welcome = (
+        "🎬 *Welcome to CineAgent!* Your personal AI movie concierge.\n\n"
+        "Here's what I can do:\n"
+        "▪ /movie — Get a random pick from your IMDb watchlist\n"
+        "▪ /mood <vibe> — Get a pick tailored to your mood\n"
+        "  e.g. /mood dark thriller, /mood something funny\n"
+        "▪ Just *chat* — Ask me anything about movies"
+    )
+    bot.reply_to(message, welcome, parse_mode="Markdown")
+
 @bot.message_handler(commands=['movie'])
 def movie_command(message: Message):
     if str(message.chat.id) != personal_chat_id:
@@ -103,6 +118,68 @@ def movie_command(message: Message):
     except Exception as e:
         print(f"Error: {e}")
         bot.reply_to(message, "Sorry, I couldn't create a recommendation right now. Please try again.")
+
+@bot.message_handler(commands=['mood'])
+def mood_command(message: Message):
+    if str(message.chat.id) != personal_chat_id:
+        bot.reply_to(message, "Sorry, you are not authorized to use this bot.")
+        return
+
+    # Extract everything after "/mood" as the vibe string
+    mood_text = message.text.replace('/mood', '', 1).strip()
+
+    # Guard: user sent /mood with no description
+    if not mood_text:
+        bot.reply_to(
+            message,
+            "🎥 Tell me your vibe! Examples:\n"
+            "/mood dark gritty thriller\n"
+            "/mood something funny and lighthearted\n"
+            "/mood mind-bending sci-fi\n"
+            "/mood feel-good and inspiring"
+        )
+        return
+
+    try:
+        bot.send_chat_action(message.chat.id, "typing")
+
+        # KEY ARCHITECTURE LESSON:
+        # Instead of hoping the LLM will call the right tool (unreliable with free models),
+        # we call tool_recommend_by_mood DIRECTLY in Python for the search/filter logic,
+        # then hand the result to the LLM ONLY for the language/pitch part.
+        # Rule: "Use Python for logic. Use LLM for language."
+        result = tools.tool_recommend_by_mood(mood=mood_text, chat_id=message.chat.id)
+        candidates = result.get("candidates", [])
+        matched_genres = result.get("matched_genres", [])
+
+        if not candidates:
+            bot.reply_to(
+                message,
+                f"Hmm, I couldn't find any unwatched movies in your watchlist matching '{mood_text}'.\n"
+                f"Try a different vibe, or type /movie for a random pick!"
+            )
+            return
+
+        # Pick the best candidate (first = highest on watchlist)
+        movie_data = candidates[0]
+        state.set_current_movie(message.chat.id, movie_data["title"])
+
+        # Now let the LLM write a cinematic pitch for the chosen movie
+        prompt = (
+            f"You are CineAgent. Write a compelling 2-3 sentence pitch for '{movie_data['title']}' "
+            f"({movie_data['year']}, {movie_data['genres']}, rated {movie_data['rating']}/10).\n"
+            f"The user is in the mood for: {mood_text}.\n"
+            f"Explain why THIS movie perfectly matches their vibe right now. "
+            f"Do NOT invent plot details or cast. No title header needed."
+        )
+        pitch = ask_openrouter(prompt)
+        text = format_movie_recommendation(movie_data, pitch)
+        bot.reply_to(message, text, reply_markup=get_movie_keyboard())
+
+    except Exception as e:
+        print(f"Mood Error: {e}")
+        bot.reply_to(message, "Couldn't find a mood match right now. Try describing your vibe differently!")
+
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callback(call):

@@ -6,8 +6,40 @@ import tools
 
 load_dotenv()
 
+# ─── CineAgent Persona ────────────────────────────────────────────────────────
+# This is injected as the FIRST system message in every LLM call.
+# Think of it as the "soul" of the bot — it shapes tone, rules, and behavior.
+CINEAGENT_PERSONA = """You are CineAgent — a passionate, opinionated AI cinephile and personal movie concierge.
+
+Your personality:
+- You speak like a film critic who genuinely loves movies across all eras, genres, and cultures
+- You are enthusiastic but never over-the-top; thoughtful but never dry
+- You give honest takes and specific reasons why someone should watch a film TODAY
+- You avoid hollow phrases like "masterpiece" or "timeless classic" unless you can justify them
+- When recommending, you paint a vivid picture of the viewing experience — the mood, tension, and feeling
+
+Your capabilities:
+- You can search the user's personal IMDb watchlist by title, genre, or mood
+- You recommend movies based on the user's current vibe, history, and preferences
+- You always try to recommend from the user's actual watchlist before making up suggestions
+- You know what the user has seen, liked, and disliked
+
+Your rules:
+- Never invent plot details, cast members, or awards you are not certain about
+- Always search the watchlist first when recommending or looking up a film
+- Keep responses concise and punchy — this is a chat, not a film school essay
+- If the user asks for a mood-based pick, call the recommend_by_mood tool
+- Be warm, direct, and always cinema-passionate"""
+
 openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
-model = "liquid/lfm-2.5-2.6b:free"
+
+# ⚠️  Model choice matters enormously for tool/function calling.
+# Small models (< 7B) often output tool calls as raw text tokens instead
+# of the structured JSON {"tool_calls": [...]} the API expects.
+# nemotron-120b was VERIFIED to emit proper structured tool_calls on OpenRouter.
+# (Google Gemma-31b and Qwen-27b were rate-limited on the free shared pool)
+model = "nvidia/nemotron-3-super-120b-a12b:free"
+
 openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
 
 def ask_openrouter(prompt: str, system_context: str = "", chat_id: str = None, enable_tools: bool = False) -> str:
@@ -15,8 +47,14 @@ def ask_openrouter(prompt: str, system_context: str = "", chat_id: str = None, e
         raise RuntimeError("OPENROUTER_API_KEY is not set.")
 
     messages = []
+
+    # Always inject the CineAgent persona as the first system message.
+    # If extra context is provided (e.g. current movie), we append it to the persona.
+    full_system = CINEAGENT_PERSONA
     if system_context:
-        messages.append({"role": "system", "content": system_context})
+        full_system += f"\n\nAdditional context: {system_context}"
+    messages.append({"role": "system", "content": full_system})
+
     messages.append({"role": "user", "content": prompt})
 
     payload = {
@@ -37,6 +75,12 @@ def ask_openrouter(prompt: str, system_context: str = "", chat_id: str = None, e
         )
         response.raise_for_status()
         res_json = response.json()
+
+        # Log and surface API errors clearly instead of cryptic KeyErrors
+        if "choices" not in res_json:
+            print(f"OpenRouter API error response: {res_json}")
+            raise ValueError(f"No choices in response: {res_json.get('error', res_json)}")
+
         message_data = res_json["choices"][0]["message"]
 
         # Step 2: Check if LLM requested a Tool Call
