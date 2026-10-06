@@ -7,7 +7,16 @@ def run_agent(prompt: str, chat_id: str | int) -> str:
     """Orchestrates the Agentic Loop: UNDERSTAND -> DECIDE -> ACT -> OBSERVE -> RESPOND."""
     # 1. Fetch user context from State
     current_movie = state.get_current_movie(chat_id)
-    system_context = f"The user is currently discussing the movie: {current_movie}." if current_movie else ""
+    preferences = state.get_preferences(chat_id)
+    context_parts = []
+    if current_movie:
+        context_parts.append(f"The user is currently discussing the movie: {current_movie}.")
+    if any(preferences.values()):
+        context_parts.append(
+            "These are explicit user preferences. Follow them, but do not infer or save new ones: "
+            + json.dumps(preferences)
+        )
+    system_context = "\n".join(context_parts)
 
     # 2. Call ask_openrouter with tools enabled
     response = ask_openrouter(
